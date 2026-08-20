@@ -1,20 +1,20 @@
 --[[
     TzuyBuff - Script Buff: Chạy nhanh, Nhảy cao, Nhảy vô hạn, Bay
-    Dán vào StarterPlayer > StarterPlayerScripts (LocalScript)
+    Hệ thống Anti Teleport: Sử dụng BodyVelocity để di chuyển nhanh thay vì WalkSpeed cao,
+    giúp tránh bị server phát hiện tốc độ và tele ngược lại.
 ]]
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 
 -- ===== CÀI ĐẶT =====
-local SPEED_VALUE = 50            -- Tốc độ chạy khi bật buff
+local SPEED_VALUE = 67            -- Tốc độ chạy khi bật buff
 local JUMP_POWER_VALUE = 150      -- Sức nhảy khi bật buff
 local FLY_SPEED = 50              -- Tốc độ bay
-local FLY_TOGGLE_KEY = Enum.KeyCode.F  -- Phím bật/tắt bay (nếu dùng)
+local FLY_TOGGLE_KEY = Enum.KeyCode.F  -- Phím bật/tắt bay
 -- ===================
 
 local buffs = {
@@ -30,10 +30,9 @@ local downKey = false
 
 local currentRoot = nil
 local currentHumanoid = nil
-local bodyVelocity = nil
+local bodyVelocityFly = nil
 local bodyGyro = nil
-local originalSpeed = 16
-local originalJump = 50
+local bodyVelocitySpeed = nil
 
 -- ===== TẠO GIAO DIỆN =====
 local ScreenGui = Instance.new("ScreenGui")
@@ -72,6 +71,10 @@ local speedButton = createButton("Chạy nhanh: ON", UDim2.new(0, 10, 0, 10), fu
     buffs.speed = not buffs.speed
     speedButton.Text = "Chạy nhanh: " .. (buffs.speed and "ON" or "OFF")
     speedButton.BackgroundColor3 = buffs.speed and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+    if not buffs.speed and bodyVelocitySpeed then
+        bodyVelocitySpeed.Velocity = Vector3.zero
+        bodyVelocitySpeed.MaxForce = Vector3.new(0, 0, 0)
+    end
 end)
 
 local jumpButton = createButton("Nhảy cao: ON", UDim2.new(0, 10, 0, 55), function()
@@ -105,28 +108,36 @@ local function applyBuffs(character)
     currentHumanoid = character:WaitForChild("Humanoid")
     currentRoot = character:WaitForChild("HumanoidRootPart")
 
-    -- Lưu giá trị gốc để khôi phục nếu tắt buff
-    originalSpeed = currentHumanoid.WalkSpeed
-    originalJump = currentHumanoid.JumpPower
-
-    -- Tạo body parts cho bay (ẩn sẵn)
+    -- Xóa body parts cũ nếu có
     if bodyGyro then bodyGyro:Destroy() end
-    if bodyVelocity then bodyVelocity:Destroy() end
+    if bodyVelocityFly then bodyVelocityFly:Destroy() end
+    if bodyVelocitySpeed then bodyVelocitySpeed:Destroy() end
 
+    -- Tạo BodyGyro cho bay
     bodyGyro = Instance.new("BodyGyro")
     bodyGyro.P = 9e4
     bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
     bodyGyro.CFrame = currentRoot.CFrame
     bodyGyro.Parent = currentRoot
 
-    bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.Velocity = Vector3.zero
-    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    bodyVelocity.Parent = currentRoot
+    -- Tạo BodyVelocity cho bay
+    bodyVelocityFly = Instance.new("BodyVelocity")
+    bodyVelocityFly.Velocity = Vector3.zero
+    bodyVelocityFly.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocityFly.Parent = currentRoot
 
-    if buffs.speed then currentHumanoid.WalkSpeed = SPEED_VALUE end
-    if buffs.jump then currentHumanoid.JumpPower = JUMP_POWER_VALUE end
+    -- Tạo BodyVelocity cho chạy nhanh (anti teleport)
+    bodyVelocitySpeed = Instance.new("BodyVelocity")
+    bodyVelocitySpeed.Velocity = Vector3.zero
+    bodyVelocitySpeed.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocitySpeed.Parent = currentRoot
 
+    -- Áp dụng buff jump
+    if buffs.jump then
+        currentHumanoid.JumpPower = JUMP_POWER_VALUE
+    end
+
+    -- Áp dụng trạng thái bay nếu đang bật
     if flyOn then
         enableFly()
     else
@@ -138,23 +149,32 @@ function enableFly()
     if not currentHumanoid or not currentRoot then return end
     currentHumanoid.PlatformStand = true
     currentHumanoid.AutoRotate = false
-    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocityFly.MaxForce = Vector3.new(9e9, 9e9, 9e9)
     bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    -- Tắt bodyVelocitySpeed khi bay
+    if bodyVelocitySpeed then
+        bodyVelocitySpeed.MaxForce = Vector3.new(0, 0, 0)
+        bodyVelocitySpeed.Velocity = Vector3.zero
+    end
 end
 
 function disableFly()
     if not currentHumanoid then return end
     currentHumanoid.PlatformStand = false
     currentHumanoid.AutoRotate = true
-    if bodyVelocity then
-        bodyVelocity.Velocity = Vector3.zero
-        bodyVelocity.MaxForce = Vector3.new(0, 0, 0)
+    if bodyVelocityFly then
+        bodyVelocityFly.Velocity = Vector3.zero
+        bodyVelocityFly.MaxForce = Vector3.new(0, 0, 0)
     end
     if bodyGyro then
         bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
     end
     upKey = false
     downKey = false
+    -- Kích hoạt lại bodyVelocitySpeed nếu bật speed
+    if buffs.speed and bodyVelocitySpeed then
+        bodyVelocitySpeed.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    end
 end
 
 -- Khi nhân vật xuất hiện
@@ -166,15 +186,26 @@ if player.Character then
     applyBuffs(player.Character)
 end
 
--- Duy trì buff chạy nhanh, nhảy cao (vì một số game có thể thay đổi giá trị)
+-- Duy trì buff nhảy cao
 RunService.Heartbeat:Connect(function()
     if currentHumanoid and currentHumanoid.Health > 0 then
-        if buffs.speed then
-            currentHumanoid.WalkSpeed = SPEED_VALUE
-        end
         if buffs.jump then
             currentHumanoid.JumpPower = JUMP_POWER_VALUE
         end
+    end
+end)
+
+-- Chạy nhanh sử dụng BodyVelocity (anti teleport)
+RunService.Heartbeat:Connect(function()
+    if not buffs.speed or flyOn then return end
+    if not currentRoot or not currentHumanoid or currentHumanoid.Health <= 0 then return end
+    if not currentRoot:IsDescendantOf(workspace) then return end
+
+    local direction = currentHumanoid.MoveDirection
+    if direction.Magnitude > 0 then
+        bodyVelocitySpeed.Velocity = direction * SPEED_VALUE
+    else
+        bodyVelocitySpeed.Velocity = Vector3.zero
     end
 end)
 
@@ -199,7 +230,7 @@ RunService.Heartbeat:Connect(function()
         vertical = -FLY_SPEED
     end
 
-    bodyVelocity.Velocity = direction * FLY_SPEED + Vector3.new(0, vertical, 0)
+    bodyVelocityFly.Velocity = direction * FLY_SPEED + Vector3.new(0, vertical, 0)
     if direction.Magnitude > 0 then
         bodyGyro.CFrame = CFrame.lookAt(currentRoot.Position, currentRoot.Position + direction)
     end

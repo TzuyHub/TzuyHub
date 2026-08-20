@@ -1,0 +1,245 @@
+--[[
+    TzuyBuff - Script Buff: Chạy nhanh, Nhảy cao, Nhảy vô hạn, Bay
+    Dán vào StarterPlayer > StarterPlayerScripts (LocalScript)
+]]
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+
+-- ===== CÀI ĐẶT =====
+local SPEED_VALUE = 50            -- Tốc độ chạy khi bật buff
+local JUMP_POWER_VALUE = 150      -- Sức nhảy khi bật buff
+local FLY_SPEED = 50              -- Tốc độ bay
+local FLY_TOGGLE_KEY = Enum.KeyCode.F  -- Phím bật/tắt bay (nếu dùng)
+-- ===================
+
+local buffs = {
+    speed = true,        -- Bật sẵn buff chạy nhanh
+    jump = true,         -- Bật sẵn buff nhảy cao
+    infiniteJump = true, -- Bật sẵn nhảy vô hạn
+    fly = false,         -- Mặc định bay tắt
+}
+
+local flyOn = false
+local upKey = false
+local downKey = false
+
+local currentRoot = nil
+local currentHumanoid = nil
+local bodyVelocity = nil
+local bodyGyro = nil
+local originalSpeed = 16
+local originalJump = 50
+
+-- ===== TẠO GIAO DIỆN =====
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TzuyBuff"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Tiêu đề
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(0, 160, 0, 25)
+title.Position = UDim2.new(0, 10, 0, -30)
+title.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+title.BackgroundTransparency = 0.5
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 16
+title.Text = "TzuyBuff"
+title.Parent = ScreenGui
+
+local function createButton(text, position, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 160, 0, 35)
+    button.Position = position
+    button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Font = Enum.Font.SourceSansBold
+    button.TextSize = 14
+    button.Text = text
+    button.Parent = ScreenGui
+
+    button.MouseButton1Click:Connect(callback)
+    return button
+end
+
+local speedButton = createButton("Chạy nhanh: ON", UDim2.new(0, 10, 0, 10), function()
+    buffs.speed = not buffs.speed
+    speedButton.Text = "Chạy nhanh: " .. (buffs.speed and "ON" or "OFF")
+    speedButton.BackgroundColor3 = buffs.speed and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+end)
+
+local jumpButton = createButton("Nhảy cao: ON", UDim2.new(0, 10, 0, 55), function()
+    buffs.jump = not buffs.jump
+    jumpButton.Text = "Nhảy cao: " .. (buffs.jump and "ON" or "OFF")
+    jumpButton.BackgroundColor3 = buffs.jump and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+end)
+
+local infJumpButton = createButton("Nhảy vô hạn: ON", UDim2.new(0, 10, 0, 100), function()
+    buffs.infiniteJump = not buffs.infiniteJump
+    infJumpButton.Text = "Nhảy vô hạn: " .. (buffs.infiniteJump and "ON" or "OFF")
+    infJumpButton.BackgroundColor3 = buffs.infiniteJump and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+end)
+
+local flyButton = createButton("Bay: OFF", UDim2.new(0, 10, 0, 145), function()
+    flyOn = not flyOn
+    buffs.fly = flyOn
+    flyButton.Text = "Bay: " .. (flyOn and "ON" or "OFF")
+    flyButton.BackgroundColor3 = flyOn and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+    if flyOn then
+        if currentHumanoid and currentRoot then
+            enableFly()
+        end
+    else
+        disableFly()
+    end
+end)
+
+-- ===== XỬ LÝ BUFF =====
+local function applyBuffs(character)
+    currentHumanoid = character:WaitForChild("Humanoid")
+    currentRoot = character:WaitForChild("HumanoidRootPart")
+
+    -- Lưu giá trị gốc để khôi phục nếu tắt buff
+    originalSpeed = currentHumanoid.WalkSpeed
+    originalJump = currentHumanoid.JumpPower
+
+    -- Tạo body parts cho bay (ẩn sẵn)
+    if bodyGyro then bodyGyro:Destroy() end
+    if bodyVelocity then bodyVelocity:Destroy() end
+
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.P = 9e4
+    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bodyGyro.CFrame = currentRoot.CFrame
+    bodyGyro.Parent = currentRoot
+
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.zero
+    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocity.Parent = currentRoot
+
+    if buffs.speed then currentHumanoid.WalkSpeed = SPEED_VALUE end
+    if buffs.jump then currentHumanoid.JumpPower = JUMP_POWER_VALUE end
+
+    if flyOn then
+        enableFly()
+    else
+        disableFly()
+    end
+end
+
+function enableFly()
+    if not currentHumanoid or not currentRoot then return end
+    currentHumanoid.PlatformStand = true
+    currentHumanoid.AutoRotate = false
+    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+end
+
+function disableFly()
+    if not currentHumanoid then return end
+    currentHumanoid.PlatformStand = false
+    currentHumanoid.AutoRotate = true
+    if bodyVelocity then
+        bodyVelocity.Velocity = Vector3.zero
+        bodyVelocity.MaxForce = Vector3.new(0, 0, 0)
+    end
+    if bodyGyro then
+        bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
+    end
+    upKey = false
+    downKey = false
+end
+
+-- Khi nhân vật xuất hiện
+player.CharacterAdded:Connect(function(char)
+    applyBuffs(char)
+end)
+
+if player.Character then
+    applyBuffs(player.Character)
+end
+
+-- Duy trì buff chạy nhanh, nhảy cao (vì một số game có thể thay đổi giá trị)
+RunService.Heartbeat:Connect(function()
+    if currentHumanoid and currentHumanoid.Health > 0 then
+        if buffs.speed then
+            currentHumanoid.WalkSpeed = SPEED_VALUE
+        end
+        if buffs.jump then
+            currentHumanoid.JumpPower = JUMP_POWER_VALUE
+        end
+    end
+end)
+
+-- Nhảy vô hạn
+UserInputService.JumpRequest:Connect(function()
+    if buffs.infiniteJump and not flyOn and currentHumanoid and currentHumanoid.Health > 0 then
+        currentHumanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- Điều khiển bay
+RunService.Heartbeat:Connect(function()
+    if not flyOn then return end
+    if not currentRoot or not currentHumanoid or currentHumanoid.Health <= 0 then return end
+    if not currentRoot:IsDescendantOf(workspace) then return end
+
+    local direction = currentHumanoid.MoveDirection
+    local vertical = 0
+    if upKey then
+        vertical = FLY_SPEED
+    elseif downKey then
+        vertical = -FLY_SPEED
+    end
+
+    bodyVelocity.Velocity = direction * FLY_SPEED + Vector3.new(0, vertical, 0)
+    if direction.Magnitude > 0 then
+        bodyGyro.CFrame = CFrame.lookAt(currentRoot.Position, currentRoot.Position + direction)
+    end
+end)
+
+-- Nhận phím bấm
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == FLY_TOGGLE_KEY then
+        flyOn = not flyOn
+        buffs.fly = flyOn
+        flyButton.Text = "Bay: " .. (flyOn and "ON" or "OFF")
+        flyButton.BackgroundColor3 = flyOn and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
+        if flyOn then
+            enableFly()
+        else
+            disableFly()
+        end
+    elseif flyOn and input.KeyCode == Enum.KeyCode.Space then
+        upKey = true
+    elseif flyOn and (input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.C) then
+        downKey = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Space then
+        upKey = false
+    elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.C then
+        downKey = false
+    end
+end)
+
+-- Khi chết, tắt bay tạm thời
+if currentHumanoid then
+    currentHumanoid.Died:Connect(function()
+        flyOn = false
+        buffs.fly = false
+        flyButton.Text = "Bay: OFF"
+        flyButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    end)
+end

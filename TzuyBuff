@@ -11,7 +11,7 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 -- ===== CÀI ĐẶT =====
-local SPEED_VALUE = 67            -- Tốc độ chạy khi bật buff
+local SPEED_VALUE = 167           -- Tốc độ chạy khi bật buff
 local JUMP_POWER_VALUE = 150      -- Sức nhảy khi bật buff
 local FLY_SPEED = 50              -- Tốc độ bay
 local FLY_TOGGLE_KEY = Enum.KeyCode.F  -- Phím bật/tắt bay
